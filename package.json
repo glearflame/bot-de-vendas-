@@ -1,0 +1,23 @@
+{
+  "name": "discord-vendas-bot",
+  "version": "1.0.0",
+  "description": "Bot de vendas em PT-BR para Discord com tickets, carrinho, PIX e banco local.",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy:commands": "node src/deploy-commands.js"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.18.0",
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7",
+    "nanoid": "^5.0.9",
+    "zod": "^3.24.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
