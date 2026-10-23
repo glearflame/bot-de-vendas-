@@ -1,5 +1,7 @@
 # Bot de Vendas para Discord
 
+> Projeto pessoal, escrito em PT-BR e mantido sem compromisso de suporte. Nao e um SaaS: voce clona, configura e roda no seu proprio servidor.
+
 Bot de vendas em PT-BR para Discord com loja por threads privadas, carrinho, PIX, tickets, historico de vendas e banco local SQLite.
 
 ## Recursos
@@ -183,3 +185,7 @@ src/
 - Use um cargo staff exclusivo para aprovar pagamentos.
 - Revise comprovantes antes de entregar produtos.
 - Garanta que o bot tenha permissoes apenas nos canais necessarios.
+
+## Licenca
+
+Distribuido sob a GNU Lesser General Public License v2.1 (LGPL-2.1). O texto completo esta em [LICENSE](LICENSE).
