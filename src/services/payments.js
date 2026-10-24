@@ -25,6 +25,9 @@ export function createPaymentsService(db) {
     VALUES (?, ?, ?, ?, ?)
   `);
   const selectSale = db.prepare('SELECT * FROM sales WHERE id = ?');
+  const closeCartStmt = db.prepare(
+    "UPDATE carts SET status = 'paid', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+  );
 
   function createPayment({ cartId, userId, amountCents }) {
     const id = nanoid(12);
@@ -44,26 +47,46 @@ export function createPaymentsService(db) {
     attachProofStmt.run(proofUrl, paymentId);
   }
 
-  function reviewPayment({ paymentId, reviewerId, approved }) {
-    const status = approved ? 'approved' : 'rejected';
-    const info = reviewStmt.run(status, reviewerId, paymentId);
-
-    if (info.changes === 0) {
-      const payment = getPayment(paymentId);
-      return {
-        ok: false,
-        reason: payment ? 'already_processed' : 'not_found',
-        payment: payment ?? null
-      };
-    }
-
-    return { ok: true, payment: getPayment(paymentId) };
-  }
-
   function createSaleFromPayment(payment) {
     const id = nanoid(12);
     insertSale.run(id, payment.id, payment.cart_id, payment.user_id, payment.amount_cents);
     return selectSale.get(id);
+  }
+
+  function alreadyProcessed(paymentId) {
+    const payment = getPayment(paymentId);
+    return {
+      ok: false,
+      reason: payment ? 'already_processed' : 'not_found',
+      payment: payment ?? null
+    };
+  }
+
+  // Aprovacao atomica: pagamento + venda + fechamento do carrinho na mesma
+  // transacao. BEGIN IMMEDIATE evita que outra escrita entre no meio.
+  const approveTransaction = db.transaction(({ paymentId, reviewerId }) => {
+    const info = reviewStmt.run('approved', reviewerId, paymentId);
+    if (info.changes === 0) return alreadyProcessed(paymentId);
+
+    const payment = getPayment(paymentId);
+    const sale = createSaleFromPayment(payment);
+    closeCartStmt.run(payment.cart_id);
+    return { ok: true, payment, sale };
+  }).immediate;
+
+  const rejectTransaction = db.transaction(({ paymentId, reviewerId }) => {
+    const info = reviewStmt.run('rejected', reviewerId, paymentId);
+    if (info.changes === 0) return alreadyProcessed(paymentId);
+
+    return { ok: true, payment: getPayment(paymentId) };
+  }).immediate;
+
+  function approvePayment(args) {
+    return approveTransaction(args);
+  }
+
+  function rejectPayment(args) {
+    return rejectTransaction(args);
   }
 
   function markDelivered(saleId) {
@@ -83,7 +106,8 @@ export function createPaymentsService(db) {
     getPayment,
     getPaymentByCart,
     attachProof,
-    reviewPayment,
+    approvePayment,
+    rejectPayment,
     createSaleFromPayment,
     markDelivered,
     listRecentSales

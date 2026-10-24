@@ -46,11 +46,11 @@ migrate();
 const {
   attachProof,
   createPayment,
-  createSaleFromPayment,
   getPaymentByCart,
   listRecentSales,
   markDelivered,
-  reviewPayment
+  approvePayment,
+  rejectPayment
 } = createPaymentsService(db);
 
 const client = new Client({
@@ -339,21 +339,27 @@ async function handlePaymentButton(interaction) {
   }
 
   const [, action, paymentId] = interaction.customId.split(':');
-  const approved = action === 'approve';
-  const result = reviewPayment({ paymentId, reviewerId: interaction.user.id, approved });
+  const reviewerId = interaction.user.id;
 
+  if (action === 'reject') {
+    const result = rejectPayment({ paymentId, reviewerId });
+    if (!result.ok) {
+      await interaction.reply({ content: reviewErrorMessage(result), ephemeral: true });
+      return;
+    }
+    await interaction.reply('Pagamento reprovado. Cliente, envie um novo comprovante ou fale com a equipe.');
+    return;
+  }
+
+  // Aprovacao: update do pagamento + venda + fechamento do carrinho sao
+  // atomicos dentro do servico.
+  const result = approvePayment({ paymentId, reviewerId });
   if (!result.ok) {
     await interaction.reply({ content: reviewErrorMessage(result), ephemeral: true });
     return;
   }
 
-  if (!approved) {
-    await interaction.reply('Pagamento reprovado. Cliente, envie um novo comprovante ou fale com a equipe.');
-    return;
-  }
-
-  const sale = createSaleFromPayment(result.payment);
-  closeCart(result.payment.cart_id, 'paid');
+  const { sale } = result;
   await interaction.reply(`Pagamento aprovado. Venda \`${sale.id}\` registrada. A equipe pode entregar o produto.`);
   await logSale(interaction, sale);
 }
