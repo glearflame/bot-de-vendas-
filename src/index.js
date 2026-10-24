@@ -19,15 +19,7 @@ import {
   removeItem,
   setCartMessageId
 } from './services/cart.js';
-import {
-  attachProof,
-  createPayment,
-  createSaleFromPayment,
-  getPaymentByCart,
-  listRecentSales,
-  markDelivered,
-  reviewPayment
-} from './services/payments.js';
+import { createPaymentsService } from './services/payments.js';
 import { pixInstructions } from './services/pix.js';
 import {
   closeTicket,
@@ -50,6 +42,16 @@ import { formatBRL, parseBRL } from './utils/money.js';
 import { isStaff, requireStaff } from './utils/permissions.js';
 
 migrate();
+
+const {
+  attachProof,
+  createPayment,
+  createSaleFromPayment,
+  getPaymentByCart,
+  listRecentSales,
+  markDelivered,
+  reviewPayment
+} = createPaymentsService(db);
 
 const client = new Client({
   intents: [
@@ -338,17 +340,27 @@ async function handlePaymentButton(interaction) {
 
   const [, action, paymentId] = interaction.customId.split(':');
   const approved = action === 'approve';
-  const payment = reviewPayment({ paymentId, reviewerId: interaction.user.id, approved });
+  const result = reviewPayment({ paymentId, reviewerId: interaction.user.id, approved });
+
+  if (!result.ok) {
+    await interaction.reply({ content: reviewErrorMessage(result), ephemeral: true });
+    return;
+  }
 
   if (!approved) {
     await interaction.reply('Pagamento reprovado. Cliente, envie um novo comprovante ou fale com a equipe.');
     return;
   }
 
-  const sale = createSaleFromPayment(payment);
-  closeCart(payment.cart_id, 'paid');
+  const sale = createSaleFromPayment(result.payment);
+  closeCart(result.payment.cart_id, 'paid');
   await interaction.reply(`Pagamento aprovado. Venda \`${sale.id}\` registrada. A equipe pode entregar o produto.`);
   await logSale(interaction, sale);
+}
+
+function reviewErrorMessage(result) {
+  if (result.reason === 'not_found') return 'Pagamento nao encontrado.';
+  return 'Esse pagamento ja foi processado por outra pessoa. Nenhuma venda nova foi criada.';
 }
 
 async function refreshCart(interaction, cartId) {
