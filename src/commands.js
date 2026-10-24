@@ -72,5 +72,19 @@ export const commands = [
   new SlashCommandBuilder()
     .setName('ticket-fechar')
     .setDescription('Fecha o ticket da thread atual.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads),
+
+  new SlashCommandBuilder()
+    .setName('threads-limpar')
+    .setDescription('Lista ou arquiva threads de compra/ticket sem atividade.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageThreads)
+    .addIntegerOption((option) => option
+      .setName('dias')
+      .setDescription('Inatividade minima em dias (padrao: 7)')
+      .setMinValue(1)
+      .setRequired(false))
+    .addBooleanOption((option) => option
+      .setName('dry-run')
+      .setDescription('Apenas listar, sem arquivar (padrao: true)')
+      .setRequired(false))
 ].map((command) => command.toJSON());

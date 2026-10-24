@@ -17,6 +17,7 @@ import {
   createTicketCategory,
   listTicketCategories
 } from './services/tickets.js';
+import { runThreadsCleanup } from './services/threads.js';
 import {
   cartEmbed,
   cartItemRows,
@@ -265,6 +266,32 @@ async function handleCommand(interaction) {
     await interaction.reply('Ticket fechado. A thread sera arquivada.');
     await interaction.channel.setArchived(true, 'Ticket fechado pela equipe.');
   }
+
+  if (interaction.commandName === 'threads-limpar') {
+    const denied = requireStaff(interaction);
+    if (denied) return;
+
+    const days = interaction.options.getInteger('dias') ?? 7;
+    const dryRun = interaction.options.getBoolean('dry-run') ?? true;
+
+    await interaction.deferReply({ ephemeral: true });
+    const result = await runThreadsCleanup({
+      db,
+      guild: interaction.guild,
+      days,
+      dryRun,
+      archivedBy: interaction.user.id
+    });
+
+    const embed = threadCleanupEmbed(result, { days, dryRun });
+    await interaction.editReply({ embeds: [embed] });
+
+    // Em dry-run nada e enviado ao canal de log. Na execucao real, uma
+    // segunda rodada sem threads nao gera log duplicado.
+    if (!dryRun && (result.archived.length || result.errors.length)) {
+      await logThreadCleanup(interaction, result, days);
+    }
+  }
 }
 
 async function handleSelect(interaction) {
@@ -458,6 +485,48 @@ async function logSale(interaction, sale) {
         )
     ]
   });
+}
+
+function threadCleanupEmbed(result, { days, dryRun }) {
+  const shown = result.candidates.slice(0, 20).map((thread) => [
+    `\u2022 <#${thread.threadId}>`,
+    `<@${thread.userId}>`,
+    thread.kind === 'cart' ? 'carrinho' : 'ticket',
+    thread.lastActivity
+  ].join(' | '));
+
+  if (result.candidates.length > shown.length) {
+    shown.push(`... e mais ${result.candidates.length - shown.length} thread(s).`);
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(dryRun ? 0xf59e0b : 0x22c55e)
+    .setTitle(dryRun ? 'Threads inativas (dry-run)' : 'Limpeza de threads')
+    .setDescription(shown.length ? shown.join('\n') : 'Nenhuma thread inativa encontrada.')
+    .addFields(
+      { name: 'Dias', value: String(days), inline: true },
+      { name: 'Total', value: String(result.candidates.length), inline: true }
+    );
+
+  if (!dryRun) {
+    embed.addFields({ name: 'Arquivadas', value: String(result.archived.length), inline: true });
+    if (result.errors.length) {
+      embed.addFields({
+        name: 'Falhas',
+        value: result.errors.slice(0, 10).map((item) => `${item.threadId}: ${item.message}`).join('\n')
+      });
+    }
+  }
+
+  return embed;
+}
+
+async function logThreadCleanup(interaction, result, days) {
+  if (!config.LOG_CHANNEL_ID) return;
+  const channel = await interaction.guild.channels.fetch(config.LOG_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  await channel.send({ embeds: [threadCleanupEmbed(result, { days, dryRun: false })] });
 }
 
 async function connectVoice(interaction) {

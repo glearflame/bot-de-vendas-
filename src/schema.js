@@ -80,6 +80,14 @@ export function migrateDatabase(db) {
       delivered_at TEXT,
       FOREIGN KEY(payment_id) REFERENCES payments(id)
     );
+
+    -- Threads ja arquivadas pela limpeza (ou por outro fluxo). Evita que uma
+    -- segunda execucao selecione e registre a mesma thread novamente.
+    CREATE TABLE IF NOT EXISTS archived_threads (
+      thread_id TEXT PRIMARY KEY,
+      archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      archived_by TEXT
+    );
   `);
 
   addColumnIfMissing(db, 'carts', 'cart_message_id', 'TEXT');

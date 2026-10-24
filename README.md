@@ -107,6 +107,21 @@ npm run dev
 - `/categoria-ticket`: cadastra uma categoria de atendimento.
 - `/painel-tickets`: envia o painel publico de tickets.
 - `/ticket-fechar`: fecha e arquiva a thread atual.
+- `/threads-limpar`: lista ou arquiva threads de compra/ticket sem atividade ha X dias. Por seguranca o padrao e `dry-run: true`; use `dry-run: false` para arquivar de verdade. Threads com carrinho `open` ou pagamento `proof_sent` nunca sao tocadas.
+
+Exemplo de conferencia (nao altera nada no Discord):
+
+```txt
+/threads-limpar dias:7 dry-run:true
+```
+
+Depois de conferir a lista, execute a limpeza real:
+
+```txt
+/threads-limpar dias:7 dry-run:false
+```
+
+O resumo e enviado para o canal definido em `LOG_CHANNEL_ID` (quando configurado). Se o comando rodar de novo sem threads elegiveis, nada e arquivado nem registrado novamente no log. O schema atual nao possui o conceito de thread fixada (pinned), entao nao ha exclusao desse tipo.
 
 ### Vendas
 
@@ -150,6 +165,7 @@ Ele armazena:
 - Itens do carrinho
 - Pagamentos
 - Vendas
+- Threads ja arquivadas pela limpeza (para manter a idempotencia)
 
 O arquivo do banco fica ignorado no Git para evitar vazamento de dados.
 
@@ -165,7 +181,7 @@ Os testes usam o runner nativo do Node (`node:test`) e um banco SQLite em memori
 npm test
 ```
 
-Cobrem idempotencia de aprovacao/reprovacao, rollback em falha no meio da aprovacao, preco congelado no carrinho e a migracao de `unit_price`. O workflow `.github/workflows/ci.yml` roda `npm ci` e `npm test` no Node.js 20.
+Cobrem idempotencia de aprovacao/reprovacao, rollback em falha no meio da aprovacao, preco congelado no carrinho, a migracao de `unit_price` e a limpeza de threads inativas (selecao, dry-run, falha individual e segunda execucao sem acao). O workflow `.github/workflows/ci.yml` roda `npm ci` e `npm test` no Node.js 20.
 
 
 ## Observacao sobre PIX automatico
@@ -188,6 +204,7 @@ src/
     payments.js            Pagamentos e vendas
     pix.js                 Instrucoes PIX
     products.js            Produtos
+    threads.js             Limpeza de threads inativas
     tickets.js             Tickets
   utils/
     money.js               Formatacao BRL
