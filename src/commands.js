@@ -28,6 +28,13 @@ export const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
   new SlashCommandBuilder()
+    .setName('produto-preco')
+    .setDescription('Atualiza o preco de um produto (carrinhos abertos mantem o preco congelado).')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addIntegerOption((option) => option.setName('id').setDescription('ID do produto').setRequired(true))
+    .addStringOption((option) => option.setName('preco').setDescription('Novo preco em reais, ex: 19,90').setRequired(true)),
+
+  new SlashCommandBuilder()
     .setName('categoria-ticket')
     .setDescription('Cadastra uma categoria de ticket.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)

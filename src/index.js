@@ -7,18 +7,8 @@ import {
 import { joinVoiceChannel } from '@discordjs/voice';
 import { config } from './config.js';
 import { db, getSetting, migrate, setSetting } from './db.js';
-import { createProduct, listProducts } from './services/products.js';
-import {
-  addItem,
-  closeCart,
-  createCart,
-  getCartItems,
-  getCartTotal,
-  getOpenCartByThread,
-  incrementItem,
-  removeItem,
-  setCartMessageId
-} from './services/cart.js';
+import { createProductsService } from './services/products.js';
+import { createCartService } from './services/cart.js';
 import { createPaymentsService } from './services/payments.js';
 import { pixInstructions } from './services/pix.js';
 import {
@@ -43,6 +33,19 @@ import { isStaff, requireStaff } from './utils/permissions.js';
 
 migrate();
 
+const { createProduct, listProducts, updateProductPrice } = createProductsService(db);
+const {
+  addItem,
+  closeCart,
+  createCart,
+  getCartItems,
+  getCartTotal,
+  getOpenCartByThread,
+  incrementItem,
+  removeItem,
+  setCartMessageId,
+  listOpenCartsContainingProduct
+} = createCartService(db);
 const {
   attachProof,
   createPayment,
@@ -146,6 +149,35 @@ async function handleCommand(interaction) {
       : 'Nenhum produto cadastrado.';
 
     await interaction.reply({ content: description, ephemeral: true });
+  }
+
+  if (interaction.commandName === 'produto-preco') {
+    const denied = requireStaff(interaction);
+    if (denied) return;
+
+    const productId = interaction.options.getInteger('id', true);
+    const priceCents = parseBRL(interaction.options.getString('preco', true));
+    const info = updateProductPrice(productId, priceCents);
+    if (info.changes === 0) {
+      await interaction.reply({ content: 'Produto ativo nao encontrado.', ephemeral: true });
+      return;
+    }
+
+    // Atualiza os carrinhos abertos que contem o produto. O valor cobrado
+    // continua sendo o preco congelado no item, e o embed mostra o aviso.
+    const carts = listOpenCartsContainingProduct(productId);
+    let refreshed = 0;
+    for (const cart of carts) {
+      const channel = await client.channels.fetch(cart.thread_id).catch(() => null);
+      if (!channel) continue;
+      await refreshCartMessage(channel, cart.id).catch((error) => console.error(error));
+      refreshed += 1;
+    }
+
+    await interaction.reply({
+      content: `Preco atualizado para ${formatBRL(priceCents)}. Carrinhos abertos atualizados: ${refreshed}.`,
+      ephemeral: true
+    });
   }
 
   if (interaction.commandName === 'categoria-ticket') {

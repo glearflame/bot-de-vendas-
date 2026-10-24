@@ -50,6 +50,7 @@ export function migrateDatabase(db) {
       cart_id TEXT NOT NULL,
       product_id INTEGER NOT NULL,
       quantity INTEGER NOT NULL DEFAULT 1,
+      unit_price INTEGER,
       PRIMARY KEY(cart_id, product_id),
       FOREIGN KEY(cart_id) REFERENCES carts(id),
       FOREIGN KEY(product_id) REFERENCES products(id)
@@ -82,6 +83,17 @@ export function migrateDatabase(db) {
   `);
 
   addColumnIfMissing(db, 'carts', 'cart_message_id', 'TEXT');
+  addColumnIfMissing(db, 'cart_items', 'unit_price', 'INTEGER');
+
+  // Preenche itens antigos (criados antes do preco congelado) com o preco
+  // atual do produto. A partir daqui o valor fica gravado no item.
+  db.exec(`
+    UPDATE cart_items
+    SET unit_price = (
+      SELECT price_cents FROM products WHERE products.id = cart_items.product_id
+    )
+    WHERE unit_price IS NULL
+  `);
 }
 
 function addColumnIfMissing(db, table, column, definition) {

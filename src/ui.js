@@ -68,6 +68,18 @@ export function cartEmbed(items, totalCents) {
       }
     );
 
+  const changed = items.filter((item) => item.price_changed);
+  if (changed.length) {
+    embed.addFields({
+      name: 'Aviso de preco',
+      value: [
+        `O preco de ${changed.map((item) => `**${item.name}**`).join(', ')} mudou na loja.`,
+        'Os itens do seu carrinho mantem o preco congelado de quando foram adicionados.'
+      ].join('\n'),
+      inline: false
+    });
+  }
+
   return embed;
 }
 

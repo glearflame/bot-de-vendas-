@@ -1,79 +1,121 @@
 import { nanoid } from 'nanoid';
-import { db } from '../db.js';
 
-export function createCart({ userId, threadId }) {
-  const id = nanoid(10);
-  db.prepare('INSERT INTO carts (id, user_id, thread_id) VALUES (?, ?, ?)').run(id, userId, threadId);
-  return getCart(id);
-}
-
-export function getCart(id) {
-  return db.prepare('SELECT * FROM carts WHERE id = ?').get(id);
-}
-
-export function getOpenCartByThread(threadId) {
-  return db.prepare(`
+// Servico de carrinho com o banco injetado. Isso mantem a logica testavel
+// (banco em memoria) sem depender de um client do Discord.
+export function createCartService(db) {
+  const insertCart = db.prepare('INSERT INTO carts (id, user_id, thread_id) VALUES (?, ?, ?)');
+  const selectCart = db.prepare('SELECT * FROM carts WHERE id = ?');
+  const selectOpenCartByThread = db.prepare(`
     SELECT * FROM carts WHERE thread_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1
-  `).get(threadId);
-}
-
-export function setCartMessageId(cartId, messageId) {
-  db.prepare('UPDATE carts SET cart_message_id = ? WHERE id = ?').run(messageId, cartId);
-}
-
-export function addItem(cartId, productId) {
-  db.prepare(`
-    INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?, ?, 1)
+  `);
+  const selectProductPrice = db.prepare('SELECT price_cents FROM products WHERE id = ? AND active = 1');
+  const insertItem = db.prepare(`
+    INSERT INTO cart_items (cart_id, product_id, quantity, unit_price) VALUES (?, ?, 1, ?)
     ON CONFLICT(cart_id, product_id) DO UPDATE SET quantity = quantity + 1
-  `).run(cartId, productId);
-  touchCart(cartId);
-}
+  `);
+  const selectItem = db.prepare('SELECT quantity FROM cart_items WHERE cart_id = ? AND product_id = ?');
+  const updateItemQuantity = db.prepare('UPDATE cart_items SET quantity = ? WHERE cart_id = ? AND product_id = ?');
+  const deleteItem = db.prepare('DELETE FROM cart_items WHERE cart_id = ? AND product_id = ?');
+  const touch = db.prepare('UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = ?');
 
-export function incrementItem(cartId, productId, amount) {
-  const item = db.prepare('SELECT quantity FROM cart_items WHERE cart_id = ? AND product_id = ?').get(cartId, productId);
-  if (!item) return;
-
-  const nextQuantity = item.quantity + amount;
-  if (nextQuantity <= 0) {
-    removeItem(cartId, productId);
-    return;
+  function createCart({ userId, threadId }) {
+    const id = nanoid(10);
+    insertCart.run(id, userId, threadId);
+    return getCart(id);
   }
 
-  db.prepare('UPDATE cart_items SET quantity = ? WHERE cart_id = ? AND product_id = ?').run(nextQuantity, cartId, productId);
-  touchCart(cartId);
-}
+  function getCart(id) {
+    return selectCart.get(id);
+  }
 
-export function removeItem(cartId, productId) {
-  db.prepare('DELETE FROM cart_items WHERE cart_id = ? AND product_id = ?').run(cartId, productId);
-  touchCart(cartId);
-}
+  function getOpenCartByThread(threadId) {
+    return selectOpenCartByThread.get(threadId);
+  }
 
-export function getCartItems(cartId) {
-  return db.prepare(`
-    SELECT p.id, p.name, p.description, p.price_cents, p.type, ci.quantity,
-           (p.price_cents * ci.quantity) AS subtotal_cents
-    FROM cart_items ci
-    JOIN products p ON p.id = ci.product_id
-    WHERE ci.cart_id = ?
-    ORDER BY p.type DESC, p.name
-  `).all(cartId);
-}
+  function setCartMessageId(cartId, messageId) {
+    db.prepare('UPDATE carts SET cart_message_id = ? WHERE id = ?').run(messageId, cartId);
+  }
 
-export function getCartTotal(cartId) {
-  const total = db.prepare(`
-    SELECT COALESCE(SUM(p.price_cents * ci.quantity), 0) AS total
-    FROM cart_items ci
-    JOIN products p ON p.id = ci.product_id
-    WHERE ci.cart_id = ?
-  `).get(cartId);
+  function addItem(cartId, productId) {
+    // Congela o preco do produto no momento em que o item entra no carrinho.
+    const product = selectProductPrice.get(productId);
+    if (!product) return { changes: 0 };
 
-  return total.total;
-}
+    const info = insertItem.run(cartId, productId, product.price_cents);
+    touch.run(cartId);
+    return info;
+  }
 
-export function closeCart(cartId, status) {
-  db.prepare('UPDATE carts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, cartId);
-}
+  function incrementItem(cartId, productId, amount) {
+    const item = selectItem.get(cartId, productId);
+    if (!item) return;
 
-function touchCart(cartId) {
-  db.prepare('UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(cartId);
+    const nextQuantity = item.quantity + amount;
+    if (nextQuantity <= 0) {
+      removeItem(cartId, productId);
+      return;
+    }
+
+    updateItemQuantity.run(nextQuantity, cartId, productId);
+    touch.run(cartId);
+  }
+
+  function removeItem(cartId, productId) {
+    deleteItem.run(cartId, productId);
+    touch.run(cartId);
+  }
+
+  function getCartItems(cartId) {
+    return db.prepare(`
+      SELECT p.id, p.name, p.description, p.type, ci.quantity,
+             COALESCE(ci.unit_price, p.price_cents) AS unit_price,
+             p.price_cents AS current_price_cents,
+             (COALESCE(ci.unit_price, p.price_cents) * ci.quantity) AS subtotal_cents,
+             (COALESCE(ci.unit_price, p.price_cents) <> p.price_cents) AS price_changed
+      FROM cart_items ci
+      JOIN products p ON p.id = ci.product_id
+      WHERE ci.cart_id = ?
+      ORDER BY p.type DESC, p.name
+    `).all(cartId);
+  }
+
+  function getCartTotal(cartId) {
+    const total = db.prepare(`
+      SELECT COALESCE(SUM(COALESCE(ci.unit_price, p.price_cents) * ci.quantity), 0) AS total
+      FROM cart_items ci
+      JOIN products p ON p.id = ci.product_id
+      WHERE ci.cart_id = ?
+    `).get(cartId);
+
+    return total.total;
+  }
+
+  function closeCart(cartId, status) {
+    db.prepare('UPDATE carts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, cartId);
+  }
+
+  // Carrinhos abertos que contem o produto, para atualizar as mensagens
+  // quando o dono edita o preco.
+  function listOpenCartsContainingProduct(productId) {
+    return db.prepare(`
+      SELECT DISTINCT c.*
+      FROM carts c
+      JOIN cart_items ci ON ci.cart_id = c.id
+      WHERE c.status = 'open' AND ci.product_id = ?
+    `).all(productId);
+  }
+
+  return {
+    createCart,
+    getCart,
+    getOpenCartByThread,
+    setCartMessageId,
+    addItem,
+    incrementItem,
+    removeItem,
+    getCartItems,
+    getCartTotal,
+    closeCart,
+    listOpenCartsContainingProduct
+  };
 }
