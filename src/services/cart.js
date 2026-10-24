@@ -13,10 +13,26 @@ export function createCartService(db) {
     INSERT INTO cart_items (cart_id, product_id, quantity, unit_price) VALUES (?, ?, 1, ?)
     ON CONFLICT(cart_id, product_id) DO UPDATE SET quantity = quantity + 1
   `);
-  const selectItem = db.prepare('SELECT quantity FROM cart_items WHERE cart_id = ? AND product_id = ?');
-  const updateItemQuantity = db.prepare('UPDATE cart_items SET quantity = ? WHERE cart_id = ? AND product_id = ?');
+  const incrementItemQuantity = db.prepare(
+    'UPDATE cart_items SET quantity = quantity + ? WHERE cart_id = ? AND product_id = ?'
+  );
+  const deleteNonPositiveItem = db.prepare(
+    'DELETE FROM cart_items WHERE cart_id = ? AND product_id = ? AND quantity <= 0'
+  );
   const deleteItem = db.prepare('DELETE FROM cart_items WHERE cart_id = ? AND product_id = ?');
   const touch = db.prepare('UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+
+  // Soma relativa feita pelo proprio SQLite, dentro de uma transacao. Assim
+  // duas instancias do bot nao perdem incremento por causa de read-then-write.
+  const applyItemIncrement = db.transaction((cartId, productId, amount) => {
+    const info = incrementItemQuantity.run(amount, cartId, productId);
+    if (info.changes === 0) return;
+
+    // Quantidade zerada (ou negativa) remove o item. O DELETE condicional
+    // evita apagar uma linha que outra operacao tenha acabado de repor.
+    deleteNonPositiveItem.run(cartId, productId);
+    touch.run(cartId);
+  });
 
   function createCart({ userId, threadId }) {
     const id = nanoid(10);
@@ -47,17 +63,7 @@ export function createCartService(db) {
   }
 
   function incrementItem(cartId, productId, amount) {
-    const item = selectItem.get(cartId, productId);
-    if (!item) return;
-
-    const nextQuantity = item.quantity + amount;
-    if (nextQuantity <= 0) {
-      removeItem(cartId, productId);
-      return;
-    }
-
-    updateItemQuantity.run(nextQuantity, cartId, productId);
-    touch.run(cartId);
+    applyItemIncrement(cartId, productId, amount);
   }
 
   function removeItem(cartId, productId) {
