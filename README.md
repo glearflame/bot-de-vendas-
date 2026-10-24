@@ -10,6 +10,7 @@ Bot de vendas em PT-BR para Discord com loja por threads privadas, carrinho, PIX
 - Atendimento privado por thread para cada cliente
 - Produtos principais e complementares
 - Carrinho com controle de quantidade, remocao e total em BRL
+- Preco congelado por item do carrinho (mudancas de preco nao afetam pedidos ja montados)
 - Checkout PIX com dados configuraveis no `.env`
 - Recebimento de comprovante por imagem ou PDF
 - Aprovacao ou reprovacao manual de pagamento pela equipe
@@ -99,6 +100,7 @@ npm run dev
 - `/setup-loja`: envia o painel publico da loja no canal atual.
 - `/produto-adicionar`: cadastra um produto principal ou complemento.
 - `/produto-listar`: lista produtos ativos cadastrados.
+- `/produto-preco`: atualiza o preco de um produto e avisa os carrinhos abertos que o contem. O valor ja congelado nos itens nao muda.
 
 ### Tickets
 
@@ -151,6 +153,21 @@ Ele armazena:
 
 O arquivo do banco fica ignorado no Git para evitar vazamento de dados.
 
+O banco roda em modo WAL (`journal_mode = WAL`) e as operacoes criticas de aprovacao de pagamento usam uma transacao `BEGIN IMMEDIATE` (via `db.transaction(...).immediate` do `better-sqlite3`). Isso garante que atualizar o pagamento, criar a venda e fechar o carrinho aconteca de forma atomica: se qualquer passo falhar, tudo e revertido.
+
+O preco de cada item e congelado em `cart_items.unit_price` quando ele entra no carrinho. A migracao adiciona essa coluna de forma idempotente e preenche itens antigos com o preco atual do produto.
+
+## Testes
+
+Os testes usam o runner nativo do Node (`node:test`) e um banco SQLite em memoria, sem precisar de token ou client do Discord:
+
+```bash
+npm test
+```
+
+Cobrem idempotencia de aprovacao/reprovacao, rollback em falha no meio da aprovacao, preco congelado no carrinho e a migracao de `unit_price`. O workflow `.github/workflows/ci.yml` roda `npm ci` e `npm test` no Node.js 20.
+
+
 ## Observacao sobre PIX automatico
 
 Este projeto ja possui fluxo PIX com comprovante e revisao pela equipe. A validacao 100% automatica de PIX depende de uma API de pagamento, como Mercado Pago, Efi/Gerencianet, Asaas, OpenPix ou outro provedor.
@@ -185,6 +202,14 @@ src/
 - Use um cargo staff exclusivo para aprovar pagamentos.
 - Revise comprovantes antes de entregar produtos.
 - Garanta que o bot tenha permissoes apenas nos canais necessarios.
+
+## Creditos
+
+O review do [u/Able-Emu-606](https://www.reddit.com/r/brdev/comments/1xczscf/) no r/brdev apontou tres problemas reais que foram corrigidos neste repositorio:
+
+1. Idempotencia na aprovacao de pagamento: cliques duplicados nao criam mais vendas duplicadas.
+2. Atomicidade do fluxo de aprovacao: pagamento, venda e fechamento do carrinho na mesma transacao.
+3. Preco congelado no carrinho: mudar o preco de um produto nao altera pedidos ja montados, e os carrinhos abertos recebem um aviso.
 
 ## Licenca
 
